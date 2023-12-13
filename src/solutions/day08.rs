@@ -1,5 +1,4 @@
 use itertools::Itertools;
-use num::integer::lcm;
 use num::Integer;
 
 use super::Solver;
