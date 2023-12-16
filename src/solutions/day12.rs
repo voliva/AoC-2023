@@ -1,7 +1,7 @@
 use itertools::Itertools;
 
 use super::Solver;
-use std::collections::HashSet;
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::iter::zip;
@@ -9,7 +9,7 @@ use std::str::FromStr;
 
 pub struct Problem;
 
-#[derive(Debug)]
+#[derive(Debug, Hash, PartialEq, Eq, Clone)]
 pub struct Report {
     operational: Vec<Option<bool>>,
     contiguous: Vec<usize>,
@@ -36,7 +36,7 @@ impl FromStr for Report {
     }
 }
 
-fn print_posibility(p: &Vec<bool>) -> String {
+fn _print_posibility(p: &Vec<bool>) -> String {
     p.iter()
         .map(|v| match v {
             true => '#',
@@ -46,7 +46,7 @@ fn print_posibility(p: &Vec<bool>) -> String {
 }
 
 impl Report {
-    fn to_string(self: &Self) -> String {
+    fn _to_string(self: &Self) -> String {
         let operational: String = self
             .operational
             .iter()
@@ -60,16 +60,18 @@ impl Report {
         format!("{operational} {contiguous}")
     }
 
-    fn count_posibilities(self: &Self) -> Vec<Vec<bool>> {
-        // println!("{}", self.to_string());
-        let r = self.count_posibilities_dbg();
-        // println!("{} => {}", self.to_string(), r.len());
+    fn count_posibilities(self: &Self, memo: &mut HashMap<Report, usize>) -> usize {
+        if let Some(r) = memo.get(self) {
+            return *r;
+        }
+        let r = self.count_posibilities_memo(memo);
+        memo.insert(self.to_owned(), r);
         return r;
     }
-    fn count_posibilities_dbg(self: &Self) -> Vec<Vec<bool>> {
+    fn count_posibilities_memo(self: &Self, memo: &mut HashMap<Report, usize>) -> usize {
         let space_needed = self.get_total_contiguous() + self.contiguous.len() - 1;
         if self.operational.len() < space_needed {
-            return Vec::new();
+            return 0;
         }
 
         let first = self.contiguous[0];
@@ -82,7 +84,7 @@ impl Report {
                         None => true,
                     })
                 })
-                .collect();
+                .count();
         }
 
         let first_fits = (0..first + 1).all(|i| match self.operational[i] {
@@ -105,17 +107,7 @@ impl Report {
                     .map(|v| v.to_owned())
                     .collect(),
             };
-            return equivalent
-                .count_posibilities()
-                .iter()
-                .map(|n| {
-                    (0..first)
-                        .map(|_| true)
-                        .chain((0..1).map(|_| false))
-                        .chain(n.iter().map(|v| *v))
-                        .collect()
-                })
-                .collect();
+            return equivalent.count_posibilities(memo);
         }
         if let Some(false) = self.operational[0] {
             let count = self
@@ -133,16 +125,7 @@ impl Report {
                     .collect(),
                 contiguous: self.contiguous.clone(),
             };
-            return equivalent
-                .count_posibilities()
-                .iter()
-                .map(|n| {
-                    (0..count)
-                        .map(|_| false)
-                        .chain(n.iter().map(|v| *v))
-                        .collect()
-                })
-                .collect();
+            return equivalent.count_posibilities(memo);
         }
 
         let remaining_space = self.operational.len()
@@ -150,24 +133,24 @@ impl Report {
             - first
             + 1;
         if remaining_space == 0 {
-            return Vec::new();
+            return 0;
         }
 
         return (0..(remaining_space))
-            .flat_map(|v| {
+            .map(|v| {
                 if (0..v)
                     .any(|i| self.operational[i].is_some() && self.operational[i].unwrap() == true)
                 {
-                    return Vec::new();
+                    return 0;
                 }
                 if (v..(v + first))
                     .any(|i| self.operational[i].is_some() && self.operational[i].unwrap() == false)
                 {
-                    return Vec::new();
+                    return 0;
                 }
                 let space = v + first;
                 if self.operational[space].is_some() && self.operational[space].unwrap() == true {
-                    return Vec::new();
+                    return 0;
                 }
 
                 let next = Report {
@@ -184,21 +167,10 @@ impl Report {
                         .map(|v| v.to_owned())
                         .collect(),
                 };
-                let next_result = next.count_posibilities();
-
-                return next_result
-                    .iter()
-                    .map(|n| {
-                        (0..v)
-                            .map(|_| false)
-                            .chain((v..(v + first)).map(|_| true))
-                            .chain((0..1).map(|_| false))
-                            .chain(n.iter().map(|v| *v))
-                            .collect()
-                    })
-                    .collect();
+                return next.count_posibilities(memo);
             })
-            .collect();
+            .reduce(|a, b| a + b)
+            .unwrap();
     }
 
     fn get_total_contiguous(self: &Self) -> usize {
@@ -209,22 +181,25 @@ impl Report {
             .unwrap()
     }
 
-    fn verify(self: &Self, perm: &Vec<bool>) -> bool {
-        if !zip(self.operational.iter(), perm).all(|(v, r)| match v {
-            Some(op) => op == r,
-            None => true,
-        }) {
-            return false;
+    fn unfold(self: &Self) -> Self {
+        Report {
+            contiguous: (0..5)
+                .flat_map(|_| self.contiguous.iter().map(|v| *v).collect_vec())
+                .collect(),
+            operational: (0..5)
+                .flat_map(|i| {
+                    if i == 4 {
+                        self.operational.iter().map(|v| v.to_owned()).collect_vec()
+                    } else {
+                        self.operational
+                            .iter()
+                            .chain(vec![None].iter())
+                            .map(|v| v.to_owned())
+                            .collect_vec()
+                    }
+                })
+                .collect(),
         }
-
-        let str = print_posibility(perm);
-        let groups = str
-            .split(".")
-            .filter(|v| v.len() != 0)
-            .map(|v| v.len())
-            .collect_vec();
-
-        return groups == self.contiguous;
     }
 }
 
@@ -249,30 +224,21 @@ impl Solver for Problem {
     }
 
     fn solve_first(&self, input: &Self::Input) -> Result<Self::Output1, String> {
+        let mut memo = HashMap::new();
         Ok(input
             .iter()
-            .map(|v| {
-                let r = v.count_posibilities();
-                let strings = r.iter().map(|v| print_posibility(v)).collect_vec();
-                let string_set: HashSet<String> = strings.iter().map(|v| v.to_owned()).collect();
-
-                if strings.len() != string_set.len() {
-                    println!("{}", v.to_string());
-                    for p in &r {
-                        println!("{}", print_posibility(p));
-                    }
-                    println!("");
-                }
-                for fail in r.iter().filter(|it| !v.verify(it)) {
-                    println!("{}\n{}", v.to_string(), print_posibility(fail));
-                }
-                return r.len();
-            })
+            .map(|v| v.count_posibilities(&mut memo))
             .reduce(|a, b| a + b)
             .unwrap())
     }
 
     fn solve_second(&self, input: &Self::Input) -> Result<Self::Output2, String> {
-        todo!()
+        let mut memo = HashMap::new();
+        Ok(input
+            .iter()
+            .map(|v| v.unfold())
+            .map(|v| v.count_posibilities(&mut memo))
+            .reduce(|a, b| a + b)
+            .unwrap())
     }
 }
